@@ -1,0 +1,68 @@
+services:
+  ingest:
+    build: ./server
+    command: [ "python", "-m", "app.rag" ]
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_EMBEDD_MODEL: ${LLM_EMBEDD_MODEL}
+      LLM_EMBEDDING_DIMENSIONS: ${LLM_EMBEDDING_DIMENSIONS}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-document_chunks}
+      FORCE_REBUILD: ${FORCE_REBUILD:-false}
+    depends_on:
+      qdrant:
+        condition: service_started
+
+  server:
+    build: ./server
+    environment:
+      FORWARDED_ALLOW_IPS: ${TRUSTED_PROXY_IPS:-172.30.99.2}
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      LLM_EMBEDD_MODEL: ${LLM_EMBEDD_MODEL}
+      LLM_EMBEDDING_DIMENSIONS: ${LLM_EMBEDDING_DIMENSIONS}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-document_chunks}
+    ports:
+      - 8000:8000
+    networks:
+      - default
+      - proxy
+    depends_on:
+      ingest:
+        condition: service_completed_successfully
+      qdrant:
+        condition: service_started
+
+  web:
+    build: ./web
+    environment:
+      API_PROXY_TARGET: ${API_PROXY_TARGET:-http://server:8000}
+    ports:
+      - 8080:8080
+    depends_on:
+      - server
+    networks:
+      proxy:
+        ipv4_address: 172.30.99.2
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "127.0.0.1:${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+
+networks:
+  proxy:
+    ipam:
+      config:
+        - subnet: 172.30.99.0/24
